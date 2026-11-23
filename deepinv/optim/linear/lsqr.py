@@ -22,11 +22,11 @@ def lsqr(
     eta: float | torch.Tensor = 0.0,
     x0: torch.Tensor = None,
     tol: float = 1e-6,
+    stagtol: float | None = None,
     conlim: float | None = None,
     max_iter: int = 100,
     parallel_dim: None | int | list[int] = 0,
     verbose: bool = False,
-    stagtol: float | None = None,
     **kwargs,
 ) -> torch.Tensor:
     r"""
@@ -72,7 +72,7 @@ def lsqr(
 
     b_shape = _sample_shape(b, parallel_dim)
     Atb_shape = _sample_shape(x_ref, parallel_dim)
-    x_ref = 0  # free up memory
+    x_ref = 0
     scalar = _make_scalar(b_shape, Atb_shape)
 
     eta = _validate_eta(eta, b, device)
@@ -91,13 +91,14 @@ def lsqr(
     cs2 = -1.0
     sn2 = 0.0
 
+    u = b.clone()
     bnorm = normf(b)
 
     if x_is_zero:
         u = b.clone()
         beta = bnorm
     else:
-        u = b - A(x)
+        u = b.clone() - A(x)
         beta = normf(u)
 
     # Safe per-element normalization: elements whose residual is already zero
@@ -109,7 +110,7 @@ def lsqr(
         v = scalar(xt, 1 / safe_beta, b_domain=False)
     else:
         v = AT(u)
-    xt = None  # free up memory
+    xt = None
     alpha = normf(v)
 
     safe_alpha = _safe_denom(alpha)
@@ -140,9 +141,8 @@ def lsqr(
 
         if torch.any(eta > 0):
             rhobar1 = torch.sqrt(rhobar**2 + dampsq)
-            safe_rhobar1 = _safe_denom(rhobar1)
-            cs1 = rhobar / safe_rhobar1
-            sn1 = eta_sqrt / safe_rhobar1
+            cs1 = rhobar / rhobar1
+            sn1 = eta_sqrt / rhobar1
             psi = sn1 * phibar
             phibar = cs1 * phibar
         else:
@@ -162,7 +162,6 @@ def lsqr(
         safe_rho = _safe_denom(rho)
         t1 = phi / safe_rho
         t2 = -theta / safe_rho
-        nw = normf(w)
 
         search_update = scalar(w, t1, b_domain=False)
 
@@ -170,7 +169,7 @@ def lsqr(
         # ``dk = w / rho`` is only needed for the condition-number estimate; since
         # ``rho`` is per-sample, ``||dk|| = ||w|| / |rho|``, so accumulate ``ddnorm``
         # without allocating the full-vector ``dk`` (uses ``w`` before its update).
-        ddnorm = ddnorm + nw**2 / safe_rho**2
+        ddnorm = ddnorm + normf(w) ** 2 / safe_rho**2
         w = v + scalar(w, t2, b_domain=False)
 
         # if calc_var:
@@ -191,7 +190,7 @@ def lsqr(
         rnorm = torch.sqrt(phibar**2 + psi**2)
         # arnorm = alpha * abs(tau)
 
-        search_update_norm = nw * t1.abs()
+        search_update_norm = normf(search_update)
         converged = rnorm <= tol * bnorm
 
         if torch.all(converged):

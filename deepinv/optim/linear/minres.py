@@ -11,13 +11,13 @@ def minres(
     init: torch.Tensor | None = None,
     max_iter: int = 100,
     tol: float = 1e-6,
+    stagtol: float | None = None,
     eps: float = 1e-8,
     parallel_dim: None | int | list[int] = 0,
     verbose: bool = False,
     precon=lambda x: x.clone(),
-    stagtol: float | None = None,
 ) -> torch.Tensor:
-    r"""
+    """
     Minimal Residual Method for solving symmetric equations.
 
     Solves :math:`Ax=b` with :math:`A` symmetric using the MINRES algorithm in :cite:t:`paige1975solution`
@@ -50,7 +50,7 @@ def minres(
     if isinstance(b, TensorList):
         raise TypeError(
             "minres does not support TensorList inputs. "
-            "Use bicgstab or cg for TensorList (block-structured) square systems."
+            "Use bicgstab for TensorList (block-structured) square systems."
         )
 
     parallel_dim = _as_dim_list(parallel_dim)
@@ -73,7 +73,7 @@ def minres(
     zvec_prev2 = torch.zeros(solution.shape, device=b.device)  # r_(k-1) in wiki
     zvec_prev1 = b - A(solution)  # r_k in wiki
     qvec_prev1 = precon(zvec_prev1)
-    alpha_curr = torch.zeros_like(b_norm)
+    alpha_curr = torch.zeros(b.shape, dtype=b.dtype, device=b.device)
     alpha_curr = torch.linalg.vector_norm(alpha_curr, dim=dim, keepdim=True, ord=2)
     beta_prev = torch.abs(dot(zvec_prev1, qvec_prev1, dim=dim).sqrt()).clamp_min(eps)
 
@@ -148,7 +148,7 @@ def minres(
         search_curr = (search_curr - subsub_diag_term * search_prev2) / diag_term
 
         # 3) Update the solution
-        search_update = search_curr * (scale_prev * cos_curr)
+        search_update = search_curr * scale_prev * cos_curr
         solution = solution + search_update
         ###########################################
 

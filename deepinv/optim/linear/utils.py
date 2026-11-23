@@ -4,7 +4,9 @@ import torch
 from deepinv.utils.tensorlist import TensorList, zeros_like, ones_like
 
 
-def dot(a: torch.Tensor | TensorList, b: torch.Tensor, dim: int) -> torch.Tensor:
+def dot(
+    a: torch.Tensor | TensorList, b: torch.Tensor | TensorList, dim: int
+) -> torch.Tensor:
     r"""
     Computes the batched dot product between two tensors or two TensorLists along specified dimensions.
 
@@ -51,7 +53,10 @@ def _resolve_stagtol(stagtol: float | None, b: torch.Tensor | TensorList) -> flo
     heuristic constant is defined in a single place.
     """
     if stagtol is None:
-        return 8.0 * torch.finfo(b.dtype).eps
+        if isinstance(b, list):
+            return 8.0 * torch.finfo(b[1].dtype).eps
+        else:
+            return 8.0 * torch.finfo(b.dtype).eps
         # the 8 approximates stagtol to 1e-6 which has performed well in testing
     return stagtol
 
@@ -228,3 +233,24 @@ def _sym_ortho(a: torch.Tensor, b: torch.Tensor):
     s = torch.where(big_b, w, t)
     r = p.abs() * root
     return c, s, r
+
+
+def approximate_optimal_backward_error(A, b, x):
+    device, dtype = x.device, x.dtype
+    r = b - A(x)
+    normx = torch.linalg.vector_norm(x)
+    normr = torch.linalg.vector_norm(r)
+    if normx == 0 or normr == 0:
+        return 0.0
+
+    n = x.numel()
+    I = torch.eye(n, dtype=dtype, device=device)
+    M = A(I).T
+    eta = normr / normx
+
+    K = torch.cat([M, eta * I], dim=0)
+    v = torch.cat([r.reshape(-1), torch.zeros(n, dtype=dtype, device=device)])
+
+    Q, R = torch.linalg.qr(K, mode="reduced")
+    c = Q.T @ v
+    return (torch.linalg.vector_norm(c) / normx).item()

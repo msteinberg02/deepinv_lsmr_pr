@@ -24,12 +24,12 @@ def lsmr(
     eta: float | torch.Tensor = 0.0,
     x0: torch.Tensor = None,
     tol: float = 1e-6,
+    stagtol: float | None = None,
     conlim: float | None = None,
     max_iter: int = 100,
     parallel_dim: None | int | list[int] = 0,
     restart: int | None = None,
     verbose: bool = False,
-    stagtol: float | None = None,
     **kwargs,
 ) -> torch.Tensor:
     r"""
@@ -75,7 +75,6 @@ def lsmr(
 
     b_shape = _sample_shape(b, parallel_dim)
     Atb_shape = _sample_shape(x_ref, parallel_dim)
-    x_ref = None  # free up memory
     scalar = _make_scalar(b_shape, Atb_shape)
 
     bnorm = normf(b)
@@ -89,7 +88,7 @@ def lsmr(
             s.u = b.clone()
             s.beta = bnorm
         else:
-            s.u = b - A(x)
+            s.u = b.clone() - A(x)
             s.beta = normf(s.u)
 
         # Safe per-element normalization: elements whose residual is already
@@ -133,11 +132,10 @@ def lsmr(
     damp = torch.sqrt(eta)
 
     init = _reset_state(x)
-    xt = None  # free up memory (x will not be zero on reset almost certainly)
 
     maxrbar = torch.zeros_like(init.beta, device=device)
     minrbar = torch.full_like(init.beta, torch.inf, device=device)
-    acond = torch.ones_like(init.beta)
+    acond = 1.0
 
     rnorm = init.beta
 
@@ -193,8 +191,8 @@ def lsmr(
         t2 = init.zeta / _safe_denom(init.rhobar * init.rho)
         t3 = theta / _safe_denom(init.rho)
         init.hbar = init.h - scalar(init.hbar, t1, b_domain=False)
-        x = x + scalar(init.hbar, t2, b_domain=False)
-        search_update_norm = t2.abs() * normf(init.hbar)
+        search_update = scalar(init.hbar, t2, b_domain=False)
+        x = x + search_update
         init.h = init.v - scalar(init.h, t3, b_domain=False)
 
         betaacute = chat * init.betadd
@@ -228,6 +226,7 @@ def lsmr(
         acond = torch.where(sigmamin == 0, torch.inf, sigmamax / sigmamin_nonzero)
 
         xnorm = normf(x)
+        search_update_norm = normf(search_update)
         converged = rnorm <= tol * bnorm
 
         if torch.all(converged):
